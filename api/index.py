@@ -1,61 +1,22 @@
-# FILE 1: api/index.py
 from flask import Flask, request, jsonify
+import pickle
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
 import os
 
 app = Flask(__name__)
 
-# Global variables
-model = None
-le_agency = None
-le_incident = None
-feature_medians = None
+# Load the pre-trained model
+model_path = os.path.join(os.path.dirname(__file__), '..', 'model.pkl')
+with open(model_path, 'rb') as f:
+    model_data = pickle.load(f)
 
-def train_model():
-    """Train the model on startup"""
-    global model, le_agency, le_incident, feature_medians
-    
-    # Find CSV file
-    csv_path = "emergency_data_trimmed.csv"
-    if not os.path.exists(csv_path):
-        csv_path = os.path.join(os.path.dirname(__file__), "..", "emergency_data_trimmed.csv")
-    
-    df = pd.read_csv(csv_path)
-    
-    df['week_start'] = pd.to_datetime(df['week_start'])
-    df['weekday'] = df['week_start'].dt.weekday
-    
-    le_agency = LabelEncoder()
-    le_incident = LabelEncoder()
-    df['agency_enc'] = le_agency.fit_transform(df['Agency'])
-    df['incident_enc'] = le_incident.fit_transform(df['incident_type'])
-    
-    df['delay'] = (df['avg_travel_time'] > 10).astype(int)
-    
-    features = ['agency_enc', 'incident_enc', 'num_incidents', 'call_to_pickup', 'weekday']
-    
-    X = df[features].fillna(df[features].median())
-    y = df['delay']
-    
-    feature_medians = X.median().to_dict()
-    
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
-
-# Train model once
-try:
-    train_model()
-except Exception as e:
-    print(f"Warning: Could not train model: {e}")
+model = model_data['model']
+le_agency = model_data['le_agency']
+le_incident = model_data['le_incident']
+feature_medians = model_data['feature_medians']
 
 @app.route('/api/predict', methods=['POST'])
 def predict():
-    """Predict delay for an emergency call"""
     try:
         data = request.get_json()
         
@@ -86,15 +47,8 @@ def predict():
 
 @app.route('/api/agencies', methods=['GET'])
 def get_agencies():
-    """Get list of valid agencies"""
     return jsonify({'agencies': le_agency.classes_.tolist()})
 
 @app.route('/api/incident_types', methods=['GET'])
 def get_incident_types():
-    """Get list of valid incident types"""
     return jsonify({'incident_types': le_incident.classes_.tolist()})
-
-# Vercel serverless function handler
-def handler(request):
-    with app.request_context(request.environ):
-        return app.full_dispatch_request()
